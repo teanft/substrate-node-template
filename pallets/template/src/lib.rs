@@ -12,7 +12,7 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 
 	#[pallet::pallet]
-	#[pallet::generate_store(pub(super) trait Store)]
+	#[pallet::generate_store(pub (super) trait Store)]
 	pub struct Pallet<T>(_);
 
 	/// Configure the pallet by specifying the parameters and types on which it depends.
@@ -29,13 +29,12 @@ pub mod pallet {
 	// Learn more about declaring storage items:
 	// https://docs.substrate.io/main-docs/build/runtime-storage/#declaring-storage-items
 	// pub type Something<T> = StorageValue<_, u32>;
-
 	pub(super) type Claims<T: Config> = StorageMap<_, Blake2_128Concat, T::Hash, (T::AccountId, T::BlockNumber)>;
 
 	// Pallets use events to inform users when important changes are made.
 	// https://docs.substrate.io/main-docs/build/events-errors/
 	#[pallet::event]
-	#[pallet::generate_deposit(pub(super) fn deposit_event)]
+	#[pallet::generate_deposit(pub (super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		/// Event documentation should end with an array that provides descriptive names for event
 		/// parameters. [something, who]
@@ -45,6 +44,8 @@ pub mod pallet {
 		ClaimCreated { who: T::AccountId, claim: T::Hash },
 		/// Event emitted when a claim is revoked by the owner.
 		ClaimRevoked { who: T::AccountId, claim: T::Hash },
+		/// Event emitted when a claim is transferred by the owner.
+		ClaimTransferred { who_from: T::AccountId, who_to: T::AccountId, claim: T::Hash },
 	}
 
 	// Errors inform users that something went wrong.
@@ -108,6 +109,31 @@ pub mod pallet {
 
 			// Emit an event that the claim was erased.
 			Self::deposit_event(Event::ClaimRevoked { who: sender, claim });
+			Ok(())
+		}
+
+		#[pallet::weight(0)]
+		#[pallet::call_index(3)]
+		pub fn transfer_claim(origin: OriginFor<T>, claim: T::Hash, new_owner: T::AccountId) -> DispatchResult {
+			// Check that the extrinsic was signed and get the signer.
+			// This function will return an error if the extrinsic is not signed.
+			let sender = ensure_signed(origin)?;
+
+			// Get owner of the claim, if none return an error.
+			let (owner, _) = Claims::<T>::get(&claim).ok_or(Error::<T>::NoSuchClaim)?;
+
+			// Verify that sender of the current call is the claim owner.
+			ensure!(sender == owner, Error::<T>::NotClaimOwner);
+
+			// Remove claim from storage.
+			let block = Claims::<T>::get(&claim).unwrap().1;
+			Claims::<T>::remove(&claim);
+
+			// Update the claim owner.
+			Claims::<T>::insert(&claim, (&new_owner, block));
+
+			// Emit an event that the claim was transferred.
+			Self::deposit_event(Event::ClaimTransferred { who_from: sender, claim, who_to: new_owner });
 			Ok(())
 		}
 	}
